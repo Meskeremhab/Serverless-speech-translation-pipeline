@@ -40,7 +40,7 @@ class GroupStack(Stack):
             action="startTranscriptionJob",
             parameters={
                 "TranscriptionJobName": sfn.JsonPath.string_at("$.detail.requestParameters.key"),
-                "LanguageCode": "auto",
+                "LanguageCode": "es-ES",
                 "MediaFormat": "mp3",
                 "Media": {
                     "MediaFileUri": sfn.JsonPath.string_at("States.Format('s3://{}/{}', $.detail.requestParameters.bucketName, $.detail.requestParameters.key)")
