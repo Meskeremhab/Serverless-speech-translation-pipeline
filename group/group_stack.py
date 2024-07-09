@@ -92,7 +92,7 @@ class GroupStack(Stack):
                 "OutputFormat": "mp3",
                 "VoiceId": "Joanna",
                 "OutputS3BucketName.$": "$.requestParameters.bucketName",
-                "OutputS3KeyPrefix": "translations/",
+                "OutputS3Key.$": "States.Format('translations/{}.mp3', $$.Execution.Name)"
                 #"S3Bucket.$": "$.detail.requestParameters.bucketName",
                 #"S3Key.$": "States.Format('translations/{}.mp3', $.detail.requestParameters.key.replace('/', '_'))"
             },
@@ -102,7 +102,7 @@ class GroupStack(Stack):
         # Define the state machine
         definition = start_transcribe_task.next(wait_state).next(get_transcription_task).next(translate_task).next(polly_task)
         
-        state_machine = sfn.StateMachine(self, "StateMachine",
+        state_machine = sfn.StateMachine(self, "Statemachine",
             definition=sfn.Chain.start(definition),
             role=sfn_role
         )
@@ -122,18 +122,4 @@ class GroupStack(Stack):
         )
         rule.add_target(targets.SfnStateMachine(state_machine))
 
-        ## Output the State Machine ARN
-        #core.CfnOutput(
-        #    self,
-        #    "StateMachineARN",
-        #    value=state_machine.state_machine_arn,
-        #    description="The ARN of the State Machine",
-        #)
-
-        # Output the S3 Bucket Name
-        #core.CfnOutput(
-        #    self,
-        #    "S3BucketName",
-        #    value=bucket.bucket_name,
-        #    description="The name of the S3 bucket",
-        #)
+       
