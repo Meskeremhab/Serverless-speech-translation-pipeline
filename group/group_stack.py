@@ -68,12 +68,11 @@ class GroupStack(Stack):
                 "Text": sfn.JsonPath.string_at("$.TranslateText.TranslatedText"),
                 "OutputFormat": "mp3",
                 "VoiceId": "Joanna",
-                "OutputS3BucketName": sfn.JsonPath.string_at("$.detail.requestParameters.bucketName"),
-                "OutputS3KeyPrefix": "translations/"
+                "S3Bucket": sfn.JsonPath.string_at("$.detail.requestParameters.bucketName"),
+                "S3Key": sfn.JsonPath.string_at("States.Format('translations/{}.mp3', $.detail.requestParameters.key)")
             },
             iam_resources=["*"]
         )
-
         # Define the state machine
         definition = transcribe_task.next(translate_task).next(polly_task)
         
