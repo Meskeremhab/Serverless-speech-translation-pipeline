@@ -50,27 +50,42 @@ class GroupStack(Stack):
                 "IdentifyLanguage": True,  
                 "MediaFormat": "mp3",
                 "Media": {
-                    "MediaFileUri.$": "States.Format('s3://{}/{}', $.detail.requestParameters.bucketName,  $.detail.requestParameters.key)"
+                    "MediaFileUri.$": "States.Format('s3://{}/{}', $.requestParameters.bucketName,  $.requestParameters.key)"
                 },
-                "OutputBucketName.$": "$.detail.requestParameters.bucketName"
+                "OutputBucketName.$": "$.requestParameters.bucketName"
             },
             iam_resources=["*"],
             result_path="$.TranscriptionJobDetails",
         )
 
         wait_state = sfn.Wait(self, "WaitForTranscription",
-            time=sfn.WaitTime.duration(Duration.seconds(30))
+            time=sfn.WaitTime.duration(Duration.minutes(1))
         )
 
         get_transcription_task = tasks.CallAwsService(self, "GetTranscription",
             service="transcribe",
             action="getTranscriptionJob",
             parameters={
-                "TranscriptionJobName.$": "$.TranscriptionJobDetails.TranscriptionJobName"
+                "TranscriptionJobName.$": "$.TranscriptionJobDetails.TranscriptionJob.TranscriptionJobName"
             },
             iam_resources=["*"],
             result_path="$.TranscriptionJobDetails",
         )
+
+
+        check_transcription_status = sfn.Choice(self, "IsTranscriptionComplete")
+        transcription_complete = sfn.Condition.string_equals(
+            "$.TranscriptionJobDetails.TranscriptionJob.TranscriptionJobStatus", "COMPLETED"
+        )
+        transcription_failed = sfn.Condition.string_equals(
+            "$.TranscriptionJobDetails.TranscriptionJob.TranscriptionJobStatus", "FAILED"
+        )
+
+        translation_failed = sfn.Fail(self, "TranslationFailed", 
+            cause="Transcription did not complete",
+            error="TranscriptionFailed"
+        )
+
 
         translate_task = tasks.CallAwsService(self, "Translate",
             service="translate",
@@ -91,17 +106,24 @@ class GroupStack(Stack):
                 "Text.$": "$.TranslatedText.TranslatedText",
                 "OutputFormat": "mp3",
                 "VoiceId": "Joanna",
-                "OutputS3BucketName.$": "$.requestParameters.bucketName",
-                "OutputS3Key.$": "States.Format('translations/{}.mp3', $$.Execution.Name)"
-                #"S3Bucket.$": "$.detail.requestParameters.bucketName",
-                #"S3Key.$": "States.Format('translations/{}.mp3', $.detail.requestParameters.key.replace('/', '_'))"
+                #"OutputS3BucketName.$": "$.requestParameters.bucketName",
+                #"OutputS3Key.$": "States.Format('translations/{}.mp3', $$.Execution.Name)"
+                "S3BucketName.$": "$.requestParameters.bucketName",
+                "S3Key.$": "States.Format('translations/{}.mp3', $$.Execution.Name)"
             },
             iam_resources=["*"]
         )
 
+       
+        wait_and_get_task = wait_state.next(get_transcription_task)
+
         # Define the state machine
-        definition = start_transcribe_task.next(wait_state).next(get_transcription_task).next(translate_task).next(polly_task)
-        
+        definition = start_transcribe_task.next(wait_and_get_task).next(
+            check_transcription_status
+                .when(transcription_complete, translate_task.next(polly_task))
+                .when(transcription_failed, translation_failed)
+                .otherwise(wait_and_get_task)
+        )
         state_machine = sfn.StateMachine(self, "Statemachine",
             definition=sfn.Chain.start(definition),
             role=sfn_role
