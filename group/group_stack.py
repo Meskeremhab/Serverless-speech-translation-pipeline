@@ -101,18 +101,18 @@ class GroupStack(Stack):
 
         polly_task = tasks.CallAwsService(self, "Polly",
             service="polly",
-            action="synthesizeSpeech",
+            action="startSpeechSynthesisTask",
             parameters={
-                "Text.$": "$.TranslatedText.TranslatedText",
-                "OutputFormat": "mp3",
-                "VoiceId": "Joanna",
-                #"OutputS3BucketName.$": "$.requestParameters.bucketName",
-                #"OutputS3Key.$": "States.Format('translations/{}.mp3', $$.Execution.Name)"
-                "S3BucketName.$": "$.requestParameters.bucketName",
-                "S3Key.$": "States.Format('translations/{}.mp3', $$.Execution.Name)"
-            },
+                        "OutputFormat": "mp3",
+                        "OutputS3BucketName.$": "$.detail.bucket.name",
+                        "OutputS3KeyPrefix": "translations/",
+                        "Text.$": "$.TranslatedText.TranslatedText",
+                        "VoiceId": "Joanna",
+                    },
             iam_resources=["*"]
         )
+
+    
 
        
         wait_and_get_task = wait_state.next(get_transcription_task)
