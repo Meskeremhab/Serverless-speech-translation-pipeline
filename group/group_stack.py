@@ -131,6 +131,12 @@ class GroupStack(Stack):
                     "eventName": ["PutObject"],
                     "requestParameters": {
                         "bucketName": [bucket.bucket_name]
+                    },
+                    "requestParameters": {
+                        "key": [{
+                            "prefix": "translations/",
+                            "anything-but": "translations/"
+                        }]
                     }
                 }
             }
