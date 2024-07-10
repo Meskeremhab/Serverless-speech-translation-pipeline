@@ -104,7 +104,7 @@ class GroupStack(Stack):
             action="startSpeechSynthesisTask",
             parameters={
                         "OutputFormat": "mp3",
-                        "OutputS3BucketName.$": "$.detail.bucket.name",
+                        "OutputS3BucketName.$": "$.requestParameters.bucketName",
                         "OutputS3KeyPrefix": "translations/",
                         "Text.$": "$.TranslatedText.TranslatedText",
                         "VoiceId": "Joanna",
