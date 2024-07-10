@@ -5,7 +5,6 @@ from aws_cdk import (
     aws_iam as iam,
     aws_stepfunctions as sfn,
     aws_stepfunctions_tasks as tasks,
-    aws_s3_notifications as s3n,
     aws_events as events,
     aws_events_targets as targets,
 )
@@ -26,21 +25,19 @@ class GroupStack(Stack):
             assumed_by=iam.ServicePrincipal("states.amazonaws.com"),
         )
 
-        # IAM Role for Step Functions to interact with other services
+        # Grant necessary permissions to the IAM role
         bucket.grant_read_write(sfn_role)
-        sfn_role.add_managed_policy(
-            iam.ManagedPolicy.from_aws_managed_policy_name("AmazonTranscribeFullAccess")
-        )
-        sfn_role.add_managed_policy(
-            iam.ManagedPolicy.from_aws_managed_policy_name("TranslateFullAccess")
-        )
-        sfn_role.add_managed_policy(
-            iam.ManagedPolicy.from_aws_managed_policy_name("AmazonPollyFullAccess")
-        )
-        sfn_role.add_managed_policy(
-            iam.ManagedPolicy.from_aws_managed_policy_name("AmazonS3ReadOnlyAccess")
-        )
-       
+        policies = [
+            "AmazonTranscribeFullAccess",
+            "TranslateFullAccess",
+            "AmazonPollyFullAccess",
+            "AmazonS3ReadOnlyAccess"
+        ]
+        for policy in policies:
+            sfn_role.add_managed_policy(
+                iam.ManagedPolicy.from_aws_managed_policy_name(policy)
+            )
+
         # Step Functions Tasks
         start_transcribe_task = tasks.CallAwsService(self, "StartTranscription",
             service="transcribe",
@@ -72,7 +69,6 @@ class GroupStack(Stack):
             result_path="$.TranscriptionJobDetails",
         )
 
-
         check_transcription_status = sfn.Choice(self, "IsTranscriptionComplete")
         transcription_complete = sfn.Condition.string_equals(
             "$.TranscriptionJobDetails.TranscriptionJob.TranscriptionJobStatus", "COMPLETED"
@@ -85,7 +81,6 @@ class GroupStack(Stack):
             cause="Transcription did not complete",
             error="TranscriptionFailed"
         )
-
 
         translate_task = tasks.CallAwsService(self, "Translate",
             service="translate",
@@ -103,27 +98,25 @@ class GroupStack(Stack):
             service="polly",
             action="startSpeechSynthesisTask",
             parameters={
-                        "OutputFormat": "mp3",
-                        "OutputS3BucketName.$": "$.requestParameters.bucketName",
-                        "OutputS3KeyPrefix": "translations/",
-                        "Text.$": "$.TranslatedText.TranslatedText",
-                        "VoiceId": "Joanna",
-                    },
+                "OutputFormat": "mp3",
+                "OutputS3BucketName.$": "$.requestParameters.bucketName",
+                "OutputS3KeyPrefix": "translations/",
+                "Text.$": "$.TranslatedText.TranslatedText",
+                "VoiceId": "Joanna",
+            },
             iam_resources=["*"]
         )
 
-    
-
-       
-        wait_and_get_task = wait_state.next(get_transcription_task)
-
         # Define the state machine
-        definition = start_transcribe_task.next(wait_and_get_task).next(
+        definition = start_transcribe_task.next(
+            wait_state.next(get_transcription_task)
+        ).next(
             check_transcription_status
                 .when(transcription_complete, translate_task.next(polly_task))
                 .when(transcription_failed, translation_failed)
-                .otherwise(wait_and_get_task)
+                .otherwise(wait_state.next(get_transcription_task))
         )
+
         state_machine = sfn.StateMachine(self, "Statemachine",
             definition=sfn.Chain.start(definition),
             role=sfn_role
@@ -143,5 +136,3 @@ class GroupStack(Stack):
             }
         )
         rule.add_target(targets.SfnStateMachine(state_machine))
-
-       
