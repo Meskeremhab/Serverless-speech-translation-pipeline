@@ -1,13 +1,13 @@
 from aws_cdk import (
     aws_s3 as s3,
+    aws_cloudtrail as cloudtrail,
+    aws_events_targets as targets,
+    aws_stepfunctions_tasks as tasks,
+    aws_events as events,
     Stack,
     Duration,
     aws_iam as iam,
     aws_stepfunctions as sfn,
-    aws_stepfunctions_tasks as tasks,
-    aws_s3_notifications as s3n,
-    aws_events as events,
-    aws_events_targets as targets,
 )
 from constructs import Construct
 
@@ -19,6 +19,16 @@ class GroupStack(Stack):
         # S3 bucket for audio files and translations
         bucket = s3.Bucket(self, "TranslationBucket")
         
+        # Create CloudTrail trail
+        trail = cloudtrail.Trail(self, "CloudTrail",
+            bucket=bucket,
+            is_multi_region_trail=False,
+        )
+        trail.add_s3_event_selector(
+            s3_selector=[cloudtrail.S3EventSelector(bucket=bucket, object_prefix="translations/")],
+            include_management_events=True,
+        )
+
         # Create IAM role for Step Functions
         sfn_role = iam.Role(
             self,
@@ -28,18 +38,8 @@ class GroupStack(Stack):
 
         # IAM Role for Step Functions to interact with other services
         bucket.grant_read_write(sfn_role)
-        sfn_role.add_managed_policy(
-            iam.ManagedPolicy.from_aws_managed_policy_name("AmazonTranscribeFullAccess")
-        )
-        sfn_role.add_managed_policy(
-            iam.ManagedPolicy.from_aws_managed_policy_name("TranslateFullAccess")
-        )
-        sfn_role.add_managed_policy(
-            iam.ManagedPolicy.from_aws_managed_policy_name("AmazonPollyFullAccess")
-        )
-        sfn_role.add_managed_policy(
-            iam.ManagedPolicy.from_aws_managed_policy_name("AmazonS3ReadOnlyAccess")
-        )
+        for policy in ["AmazonTranscribeFullAccess", "TranslateFullAccess", "AmazonPollyFullAccess", "AmazonS3ReadOnlyAccess"]:
+            sfn_role.add_managed_policy(iam.ManagedPolicy.from_aws_managed_policy_name(policy))
        
         # Step Functions Tasks
         start_transcribe_task = tasks.CallAwsService(self, "StartTranscription",
@@ -48,16 +48,14 @@ class GroupStack(Stack):
             parameters={
                 "TranscriptionJobName.$": "States.Format('TranscriptionJob-{}', $$.Execution.Name)",
                 "IdentifyLanguage": True,  
-               # "MediaFormat": "mp3",
                 "Media": {
-                    "MediaFileUri.$": "States.Format('s3://{}/{}', $.requestParameters.bucketName,  $.requestParameters.key)"
+                    "MediaFileUri.$": "States.Format('s3://{}/{}', $.detail.requestParameters.bucketName, $.detail.requestParameters.key)"
                 },
-                "OutputBucketName.$": "$.requestParameters.bucketName"
+                "OutputBucketName.$": "$.detail.requestParameters.bucketName"
             },
             iam_resources=["*"],
             result_path="$.TranscriptionJobDetails",
         )
-
 
         wait_state = sfn.Wait(self, "WaitForTranscription",
             time=sfn.WaitTime.duration(Duration.minutes(1))
@@ -73,8 +71,6 @@ class GroupStack(Stack):
             result_path="$.TranscriptionJobDetails",
         )
 
-        
-
         read_s3_object_task = tasks.CallAwsService(self, "ReadS3Object",
             service="s3",
             action="getObject",
@@ -84,12 +80,10 @@ class GroupStack(Stack):
             },
             iam_resources=["*"],
             result_selector={
-                #"TranscriptionText.$": "$.Body"
                 "FileContents.$": "States.StringToJson($.Body)"
             },
             result_path="$.TranscriptionText"
         )
-
 
         check_transcription_status = sfn.Choice(self, "IsTranscriptionComplete")
         transcription_complete = sfn.Condition.string_equals(
@@ -116,48 +110,67 @@ class GroupStack(Stack):
             result_path="$.TranslatedText",
         )
 
-
         polly_task = tasks.CallAwsService(self, "Polly",
             service="polly",
             action="startSpeechSynthesisTask",
             parameters={
                 "OutputFormat": "mp3",
-                "OutputS3BucketName.$": "$.requestParameters.bucketName",
+                "OutputS3BucketName.$": "$.detail.requestParameters.bucketName",
                 "OutputS3KeyPrefix": "translations/",
                 "Text.$": "$.TranslatedText.TranslatedText",
                 "VoiceId": "Joanna",
             },
-            iam_resources=["*"]
+            iam_resources=["*"],
+            result_path="$.PollyResult"
         )
 
+        get_metadata_task = tasks.CallAwsService(self, "GetMetadata",
+            service="s3",
+            action="headObject",
+            parameters={
+                "Bucket.$": "$.detail.requestParameters.bucketName",
+                "Key.$": "$.detail.requestParameters.key"
+            },
+            iam_resources=["*"],
+            result_path="$.MetadataResult"
+        )
+
+        check_metadata = sfn.Choice(self, "CheckMetadata")
+        is_polly_generated = sfn.Condition.is_present("$.MetadataResult.Metadata.processed-by")
 
         wait_and_get_task = wait_state.next(get_transcription_task)
 
         # Define the state machine
-        definition = start_transcribe_task.next(wait_and_get_task).next(
-            check_transcription_status
-                .when(transcription_complete, read_s3_object_task.next(translate_task).next(polly_task))
-                .when(transcription_failed, translation_failed)
-                .otherwise(wait_and_get_task)
+        definition = get_metadata_task.next(
+            check_metadata
+                .when(is_polly_generated, sfn.Pass(self, "SkipProcessing"))
+                .otherwise(start_transcribe_task.next(wait_and_get_task).next(
+                    check_transcription_status
+                        .when(transcription_complete, read_s3_object_task.next(translate_task).next(polly_task))
+                        .when(transcription_failed, translation_failed)
+                        .otherwise(wait_and_get_task)
+                ))
         )
         state_machine = sfn.StateMachine(self, "Statemachine",
-            definition=definition,
+            definition_body=sfn.DefinitionBody.from_chainable(definition),
             role=sfn_role
         )
        
-        # EventBridge Rule to trigger Step Function
-        rule = events.Rule(self, "Rule",
-            event_pattern={
-                "source": ["aws.s3"],
-                "detail": {
-                    "eventSource": ["s3.amazonaws.com"],
-                    "eventName": ["PutObject"],
-                    "requestParameters": {
-                        "bucketName": [bucket.bucket_name]
-                    }
-                }
-            }
-        )
-        rule.add_target(targets.SfnStateMachine(state_machine))
-
-        # S3 Notification to trigger EventBridge Rule
+        #EventBridge Rule to trigger Step Function
+        #rule = events.Rule(self, "Rule",
+        #    event_pattern={
+        #        "source": ["aws.s3"],
+        #        "detail_type": ["AWS API Call via CloudTrail"],
+        #        "detail": {
+        #            "eventSource": ["s3.amazonaws.com"],
+        #            "eventName": ["PutObject"],
+        #            "requestParameters": {
+        #                "bucketName": [bucket.bucket_name],
+        #                "key": [{
+        #                    "prefix": "translations/"
+        #                }]
+        #            }
+        #        }
+        #    }
+        #)
+        #rule.add_target(targets.SfnStateMachine(state_machine))
