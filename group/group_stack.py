@@ -19,8 +19,7 @@ class GroupStack(Stack):
         super().__init__(scope, construct_id, **kwargs)
         
         # Create S3 bucket
-        bucket = s3.Bucket(self, "TranslationBucket", 
-                           removal_policy=RemovalPolicy.DESTROY)
+        bucket = s3.Bucket(self, "TranslationBucket")
         
         # Create CloudTrail trail
         trail = cloudtrail.Trail(self, "CloudTrail",
@@ -166,36 +165,4 @@ class GroupStack(Stack):
             }
         )
         rule.add_target(targets.SfnStateMachine(state_machine))
-         # Ensure bucket is empty before deletion
-        empty_bucket_translations = cr.AwsCustomResource(self, "EmptyBucketTranslations",
-            on_update={
-                "service": "S3",
-                "action": "deleteObjects",
-                "parameters": {
-                    "Bucket": bucket.bucket_name,
-                    "Delete": {
-                        "Objects": [{"Key": "translations/"}]  # Add other keys or prefixes as needed
-                    }
-                },
-                "physical_resource_id": cr.PhysicalResourceId.of(f"{bucket.bucket_name}-empty-translations")
-            },
-            policy=cr.AwsCustomResourcePolicy.from_sdk_calls(resources=cr.AwsCustomResourcePolicy.ANY_RESOURCE)
-        )
         
-        empty_bucket_awslogs = cr.AwsCustomResource(self, "EmptyBucketAWSLogs",
-            on_update={
-                "service": "S3",
-                "action": "deleteObjects",
-                "parameters": {
-                    "Bucket": bucket.bucket_name,
-                    "Delete": {
-                        "Objects": [{"Key": "AWSLogs/"}]  # Add other keys or prefixes as needed
-                    }
-                },
-                "physical_resource_id": cr.PhysicalResourceId.of(f"{bucket.bucket_name}-empty-awslogs")
-            },
-            policy=cr.AwsCustomResourcePolicy.from_sdk_calls(resources=cr.AwsCustomResourcePolicy.ANY_RESOURCE)
-        )
-        
-        empty_bucket_translations.node.add_dependency(bucket)
-        empty_bucket_awslogs.node.add_dependency(bucket)
