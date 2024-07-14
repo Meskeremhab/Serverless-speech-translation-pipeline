@@ -7,6 +7,8 @@ from aws_cdk import (
     Stack,
     Duration,
     aws_iam as iam,
+    custom_resources as cr,
+    RemovalPolicy,
     aws_stepfunctions as sfn,
 )
 from constructs import Construct
@@ -16,8 +18,9 @@ class GroupStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
         
-        # S3 bucket for audio files and translations
-        bucket = s3.Bucket(self, "TranslationBucket")
+        # Create S3 bucket
+        bucket = s3.Bucket(self, "TranslationBucket", 
+                           removal_policy=RemovalPolicy.DESTROY)
         
         # Create CloudTrail trail
         trail = cloudtrail.Trail(self, "CloudTrail",
@@ -123,7 +126,7 @@ class GroupStack(Stack):
             iam_resources=["*"],
             result_path="$.PollyResult"
         )
-
+    
         check_language_task = sfn.Choice(self, "CheckLanguage")
         is_english = sfn.Condition.string_equals("$.TranscriptionJobDetails.TranscriptionJob.LanguageCode", "en-US")
 
@@ -163,3 +166,36 @@ class GroupStack(Stack):
             }
         )
         rule.add_target(targets.SfnStateMachine(state_machine))
+         # Ensure bucket is empty before deletion
+        empty_bucket_translations = cr.AwsCustomResource(self, "EmptyBucketTranslations",
+            on_update={
+                "service": "S3",
+                "action": "deleteObjects",
+                "parameters": {
+                    "Bucket": bucket.bucket_name,
+                    "Delete": {
+                        "Objects": [{"Key": "translations/"}]  # Add other keys or prefixes as needed
+                    }
+                },
+                "physical_resource_id": cr.PhysicalResourceId.of(f"{bucket.bucket_name}-empty-translations")
+            },
+            policy=cr.AwsCustomResourcePolicy.from_sdk_calls(resources=cr.AwsCustomResourcePolicy.ANY_RESOURCE)
+        )
+        
+        empty_bucket_awslogs = cr.AwsCustomResource(self, "EmptyBucketAWSLogs",
+            on_update={
+                "service": "S3",
+                "action": "deleteObjects",
+                "parameters": {
+                    "Bucket": bucket.bucket_name,
+                    "Delete": {
+                        "Objects": [{"Key": "AWSLogs/"}]  # Add other keys or prefixes as needed
+                    }
+                },
+                "physical_resource_id": cr.PhysicalResourceId.of(f"{bucket.bucket_name}-empty-awslogs")
+            },
+            policy=cr.AwsCustomResourcePolicy.from_sdk_calls(resources=cr.AwsCustomResourcePolicy.ANY_RESOURCE)
+        )
+        
+        empty_bucket_translations.node.add_dependency(bucket)
+        empty_bucket_awslogs.node.add_dependency(bucket)
