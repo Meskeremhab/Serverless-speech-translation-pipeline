@@ -124,53 +124,42 @@ class GroupStack(Stack):
             result_path="$.PollyResult"
         )
 
-        get_metadata_task = tasks.CallAwsService(self, "GetMetadata",
-            service="s3",
-            action="headObject",
-            parameters={
-                "Bucket.$": "$.detail.requestParameters.bucketName",
-                "Key.$": "$.detail.requestParameters.key"
-            },
-            iam_resources=["*"],
-            result_path="$.MetadataResult"
-        )
-
-        check_metadata = sfn.Choice(self, "CheckMetadata")
-        is_polly_generated = sfn.Condition.is_present("$.MetadataResult.Metadata.processed-by")
+        check_language_task = sfn.Choice(self, "CheckLanguage")
+        is_english = sfn.Condition.string_equals("$.TranscriptionJobDetails.TranscriptionJob.LanguageCode", "en-US")
 
         wait_and_get_task = wait_state.next(get_transcription_task)
 
         # Define the state machine
-        definition = get_metadata_task.next(
-            check_metadata
-                .when(is_polly_generated, sfn.Pass(self, "SkipProcessing"))
-                .otherwise(start_transcribe_task.next(wait_and_get_task).next(
-                    check_transcription_status
-                        .when(transcription_complete, read_s3_object_task.next(translate_task).next(polly_task))
-                        .when(transcription_failed, translation_failed)
-                        .otherwise(wait_and_get_task)
-                ))
+        definition = start_transcribe_task.next(wait_and_get_task).next(
+            check_transcription_status
+                .when(transcription_complete, check_language_task
+                    .when(is_english, sfn.Pass(self, "SkipProcessing"))
+                    .otherwise(read_s3_object_task.next(translate_task.next(polly_task)))
+                )
+                .when(transcription_failed, translation_failed)
+                .otherwise(wait_and_get_task)
         )
+
         state_machine = sfn.StateMachine(self, "Statemachine",
-            definition_body=sfn.DefinitionBody.from_chainable(definition),
+            definition=definition,
             role=sfn_role
         )
        
         #EventBridge Rule to trigger Step Function
-        #rule = events.Rule(self, "Rule",
-        #    event_pattern={
-        #        "source": ["aws.s3"],
-        #        "detail_type": ["AWS API Call via CloudTrail"],
-        #        "detail": {
-        #            "eventSource": ["s3.amazonaws.com"],
-        #            "eventName": ["PutObject"],
-        #            "requestParameters": {
-        #                "bucketName": [bucket.bucket_name],
-        #                "key": [{
-        #                    "prefix": "translations/"
-        #                }]
-        #            }
-        #        }
-        #    }
-        #)
-        #rule.add_target(targets.SfnStateMachine(state_machine))
+        rule = events.Rule(self, "Rule",
+            event_pattern={
+                "source": ["aws.s3"],
+                "detail_type": ["AWS API Call via CloudTrail"],
+                "detail": {
+                    "eventSource": ["s3.amazonaws.com"],
+                    "eventName": ["PutObject"],
+                    "requestParameters": {
+                        "bucketName": [bucket.bucket_name],
+                        "key": [{
+                            "prefix": "translations/"
+                        }]
+                    }
+                }
+            }
+        )
+        rule.add_target(targets.SfnStateMachine(state_machine))
