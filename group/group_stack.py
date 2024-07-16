@@ -6,9 +6,8 @@ from aws_cdk import (
     aws_events as events,
     Stack,
     Duration,
-    aws_iam as iam,
-    custom_resources as cr,
     RemovalPolicy,
+    aws_iam as iam,
     aws_stepfunctions as sfn,
 )
 from constructs import Construct
@@ -18,8 +17,11 @@ class GroupStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
         
-        # Create S3 bucket
-        bucket = s3.Bucket(self, "TranslationBucket")
+      # Create S3 bucket
+        bucket = s3.Bucket(self, "TranslationBucket", 
+            removal_policy=RemovalPolicy.DESTROY,
+            auto_delete_objects=True  # This ensures the bucket is emptied on deletion
+        )
         
         # Create CloudTrail trail
         trail = cloudtrail.Trail(self, "CloudTrail",
@@ -165,4 +167,3 @@ class GroupStack(Stack):
             }
         )
         rule.add_target(targets.SfnStateMachine(state_machine))
-        

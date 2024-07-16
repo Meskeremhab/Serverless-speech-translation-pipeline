@@ -1,0 +1,21 @@
+aws s3 cp C:\\Users\\meski\\Downloads\\Test.mp3 s3://groupstack-translationbucket9c57278f-hn6xwuzf9grl/translations/Test.mp3
+{
+  "requestParameters": {
+    "X-Amz-Date": "20240708T072545Z",
+    "bucketName": "groupstack-translationbucket9c57278f-hn6xwuzf9grl",
+    "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
+    "x-amz-acl": "bucket-owner-full-control",
+    "X-Amz-SignedHeaders": "content-md5;content-type;host;x-amz-acl;x-amz-storage-class",
+    "Host": "test-ev-asdfghjjhgfdsad.s3.eu-west-1.amazonaws.com",
+    "X-Amz-Expires": "300",
+    "key": "translations/CSA Test Audio.mp3",
+    "x-amz-storage-class": "STANDARD"
+  }
+}
+
+
+# Create S3 bucket
+        bucket = s3.Bucket(self, "TranslationBucket", 
+            removal_policy=RemovalPolicy.DESTROY,
+            auto_delete_objects=True  # This ensures the bucket is emptied on deletion
+        )
