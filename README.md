@@ -1,58 +1,27 @@
+Serverless speech translation pipeline
 
-# Welcome to your CDK Python project!
 
-This is a blank project for CDK development with Python.
+Scenario
+If you remember your application process to IE University (and if it hasn't changed since I went through it), there is one step in which you have to record yourself on camera answering to some predefined questions. IE university wants to improve the user experience of the process and will now allow students to answer the questions in any language of their choice. 
 
-The `cdk.json` file tells the CDK Toolkit how to execute your app.
 
-This project is set up like a standard Python project.  The initialization
-process also creates a virtualenv within this project, stored under the `.venv`
-directory.  To create the virtualenv it assumes that there is a `python3`
-(or `python` for Windows) executable in your path with access to the `venv`
-package. If for any reason the automatic creation of the virtualenv fails,
-you can create the virtualenv manually.
 
-To manually create a virtualenv on MacOS and Linux:
+As I'm sure you have seen, IE is home for students all over the world, and employees from the admissions department don't speak every single language, so for this project to succeed they are in need of a tool that translates the recordings of the students from any language to english. They already own a software that separates the video from the audio, so you don't have to worry about that.
 
-```
-$ python -m venv .venv
-```
 
-After the init process completes and the virtualenv is created, you can use the following
-step to activate your virtualenv.
 
-```
-$ source .venv/bin/activate
-```
+Your task is to implement a serverless translation pipeline using AWS services that translates to english any audio file that is uploaded to an S3 bucket
 
-If you are a Windows platform, you would activate the virtualenv like this:
 
-```
-% .venv\Scripts\activate.bat
-```
 
-Once the virtualenv is activated, you can install the required dependencies.
+Requirements
+The newly generated audio file must be stored in the same S3 bucket where files are uploaded, under a path called "translations"
+The application must be implemented using Amazon Translate, Amazon Transcribe, Amazon Polly and AWS Step Functions
+If you implement the solution using IaC, it must be through CDK and you can only use L1 and L2 constructs.
+You must interact with the AI services using their appropriate actions directly in AWS Step Functions.
 
-```
-$ pip install -r requirements.txt
-```
 
-At this point you can now synthesize the CloudFormation template for this code.
-
-```
-$ cdk synth
-```
-
-To add additional dependencies, for example other CDK libraries, just add
-them to your `setup.py` file and rerun the `pip install -r requirements.txt`
-command.
-
-## Useful commands
-
- * `cdk ls`          list all stacks in the app
- * `cdk synth`       emits the synthesized CloudFormation template
- * `cdk deploy`      deploy this stack to your default AWS account/region
- * `cdk diff`        compare deployed stack with current state
- * `cdk docs`        open CDK documentation
-
-Enjoy!
+Considerations
+Amazon Transcribe's free tier includes only 60 minutes per month, so don't test the application with long voice files
+When configuring the rule in Event Bridge, do so in a way that it is not triggered when files are put in the /translations path, otherwise you will enter in and endless loop
+You cannot assume that I'll have in my account a trail that captures write events to S3
